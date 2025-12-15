@@ -4,6 +4,7 @@
 -- Author: Elod Gyorgy
 -- Original Project: HDMI input on 7-series Xilinx FPGA
 -- Date: 20 October 2014
+-- Last modification date: 05 October 2022
 --
 -------------------------------------------------------------------------------
 -- (c) 2014 Copyright Digilent Incorporated
@@ -41,8 +42,21 @@
 -- This module synchronizes the asynchronous signal (aIn) with the OutClk clock
 -- domain and provides it on oOut. The number of FFs in the synchronizer chain
 -- can be configured with kStages. The reset value for oOut can be configured
--- with kResetTo. The asynchronous reset (aReset) is always active-high.
---  
+-- with kResetTo. The asynchronous reset w/ synchronous de-assertion (aoReset)
+-- is always active-high.
+-- 
+-- Constraints:
+-- # Replace <InstSyncAsync> with path to SyncAsync instance, keep rest unchanged
+-- # Begin scope to SyncAsync instance
+-- current_instance [get_cells <InstSyncAsync>]
+-- # Input to synchronizer ignored for timing analysis
+-- set_false_path -through [get_ports -scoped_to_current_instance aIn]
+-- # Constrain internal synchronizer paths to half-period, which is expected to be easily met with ASYNC_REG=true
+-- set ClkPeriod [get_property PERIOD [get_clocks -of_objects [get_ports -scoped_to_current_instance OutClk]]]
+-- set_max_delay -from [get_cells oSyncStages_reg[*]] -to [get_cells oSyncStages_reg[*]] [expr $ClkPeriod/2]
+-- current_instance -quiet
+-- # End scope to SyncAsync instance
+--
 -------------------------------------------------------------------------------
 
 
@@ -63,10 +77,12 @@ entity SyncAsync is
       kResetTo : std_logic := '0'; --value when reset and upon init
       kStages : natural := 2); --double sync by default
    Port (
-      aReset : in STD_LOGIC; -- active-high asynchronous reset
+      aoReset : in STD_LOGIC; -- active-high asynchronous reset w/ sync de-assertion
       aIn : in STD_LOGIC;
       OutClk : in STD_LOGIC;
       oOut : out STD_LOGIC);
+   attribute keep_hierarchy : string;
+   attribute keep_hierarchy of SyncAsync : entity is "yes";
 end SyncAsync;
 
 architecture Behavioral of SyncAsync is
@@ -75,9 +91,9 @@ attribute ASYNC_REG : string;
 attribute ASYNC_REG of oSyncStages: signal is "TRUE";
 begin
 
-Sync: process (OutClk, aReset)
+Sync: process (OutClk, aoReset)
 begin
-   if (aReset = '1') then
+   if (aoReset = '1') then
       oSyncStages <= (others => kResetTo);
    elsif Rising_Edge(OutClk) then
       oSyncStages <= oSyncStages(oSyncStages'high-1 downto 0) & aIn;
